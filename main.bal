@@ -8,6 +8,7 @@ configurable asgardeo:ListenerConfig config = ?;
 configurable string gmailClientId = ?;
 configurable string gmailClientSecret = ?;
 configurable string gmailRefreshToken = ?;
+configurable string recipientEmail = ?;
 
 listener http:Listener httpListener = new (8090);
 listener asgardeo:Listener webhookListener = new (config, httpListener);
@@ -55,7 +56,7 @@ function sendMail(string newUserEmail, string newUserId) returns error? {
     });
 
     gmail:MessageRequest message = {
-        to: ["fazlulsalama@gmail.com"],
+        to: [recipientEmail],
         subject: "[fhirtools.io] New User Sign Up",
         bodyInHtml: emailTemplate
     };
