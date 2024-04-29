@@ -1,4 +1,5 @@
 import ballerina/http;
+import ballerina/lang.regexp;
 import ballerina/log;
 import ballerinax/googleapis.gmail;
 import ballerinax/trigger.asgardeo;
@@ -19,11 +20,7 @@ service asgardeo:RegistrationService on webhookListener {
 
         log:printInfo(event.toJsonString());
         asgardeo:GenericUserData? userData = event.eventData;
-        map<json> claims = <map<json>>userData?.claims;
-        string? email = check claims.get("http://wso2.org/claims/emailaddress");
-        string? userId = userData?.userId;
-
-        error? err = sendMail(<string>email, <string>userId);
+        error? err = sendMail(<map<json>>userData.toJson());
         if (err is error) {
             log:printInfo(err.message());
         }
@@ -43,9 +40,10 @@ service asgardeo:RegistrationService on webhookListener {
 service /ignore on httpListener {
 }
 
-function sendMail(string newUserEmail, string newUserId) returns error? {
+function sendMail(map<json> userData) returns error? {
 
-    string emailTemplate = "<!DOCTYPE html><html><head></head><body><h1>New User Sign Up!</h1><div>A new user has registered on fhirtools.io.<br><br>User Email: " + newUserEmail + "<br>User ID: " + newUserId + "</body></html>";
+    string tableTemplate = check generateTable(userData);
+    string emailTemplate = "<!DOCTYPE html><html><head><style>table { border-collapse: collapse; border: 1px solid black; width: 80%; margin: 20px auto; } th, td { border: 1px solid black; padding: 5px; } table table { width: 100%; margin: 10px auto; } table table th, table table td { border: 1px solid #ddd; } </style></head><body><h1>New User Sign Up!</h1><div>A new user has registered on fhirtools.io.<br /><br /><b>User Information</b></div>" + tableTemplate + "</body></html>";
 
     gmail:Client gmail = check new ({
         auth: {
@@ -64,3 +62,25 @@ function sendMail(string newUserEmail, string newUserId) returns error? {
     gmail:Message sendResult = check gmail->/users/me/messages/send.post(message);
     log:printInfo("Email sent. Message ID: " + sendResult.id);
 }
+
+function generateTable(map<json> userData) returns string|error {
+    
+    string htmlTable = "<table style='margin-left: 0; margin-right: auto'><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>";
+    map<json> claims = check userData.claims.ensureType();
+    foreach string val in userData.keys() {
+        if val == "claims" {
+            htmlTable += "<tr><td>claims</td><td><table><thead><tr><th>Claim</th><th>Value</th></tr></thead><tbody>";
+            string[] claimSplit;
+            foreach string claim in claims.keys() {
+                claimSplit = regexp:split(re `/`, claim);
+                htmlTable += string `<tr><td>${claimSplit[claimSplit.length() - 1]}</td><td>${claims[claim].toString()}</td></tr>`;
+            }
+            htmlTable += "</tbody></table></td></tr></tbody></table>";
+            return htmlTable;
+        }
+        htmlTable += string `<tr><td>${val}</td><td>${userData[val].toString()}</td></tr>`;
+    }
+    htmlTable += "</tbody></table>";
+    return htmlTable;
+}
+
