@@ -1,15 +1,15 @@
+import ballerina/email;
 import ballerina/http;
 import ballerina/lang.regexp;
 import ballerina/log;
-import ballerinax/googleapis.gmail;
 import ballerinax/trigger.asgardeo;
 
 configurable asgardeo:ListenerConfig config = ?;
-
-configurable string gmailClientId = ?;
-configurable string gmailClientSecret = ?;
-configurable string gmailRefreshToken = ?;
+configurable string smtpUsername = ?;
+configurable string smtpPassword = ?;
+configurable string smtpHost = ?;
 configurable string recipientEmail = ?;
+configurable string senderEmail = ?;
 
 listener http:Listener httpListener = new (8090);
 listener asgardeo:Listener webhookListener = new (config, httpListener);
@@ -42,43 +42,43 @@ service /ignore on httpListener {
 
 function sendMail(map<json> userData) returns error? {
 
-    string tableTemplate = check generateTable(userData);
-    string emailTemplate = "<!DOCTYPE html><html><head><style>table { border-collapse: collapse; border: 1px solid black; width: 80%; margin: 20px auto; } th, td { border: 1px solid black; padding: 5px; } table table { width: 100%; margin: 10px auto; } table table th, table table td { border: 1px solid #ddd; } </style></head><body><h1>New User Sign Up!</h1><div>A new user has registered on fhirtools.io.<br /><br /><b>User Information</b></div>" + tableTemplate + "</body></html>";
+    string userDataTable = check generateUserDataTable(userData);
+    string emailTemplate = "<!DOCTYPE html><html><head><style>table { border-collapse: collapse; border: 1px solid black; width: 80%; margin: 20px auto; } th, td { border: 1px solid black; padding: 5px; } table table { width: 100%; margin: 10px auto; } table table th, table table td { border: 1px solid #ddd; } div { color: black; } </style></head><body><div>A new user has registered on fhirtools.io.<br/><br/><b>User Information</b></div>" + userDataTable + "</body></html>";
 
-    gmail:Client gmail = check new ({
-        auth: {
-            refreshToken: gmailRefreshToken,
-            clientId: gmailClientId,
-            clientSecret: gmailClientSecret
-        }
-    });
-
-    gmail:MessageRequest message = {
-        to: [recipientEmail],
-        subject: "[fhirtools.io] New User Sign Up",
-        bodyInHtml: emailTemplate
+    email:SmtpConfiguration smtpConfig = {
+        port: 587,
+        security: "START_TLS_AUTO"
     };
 
-    gmail:Message sendResult = check gmail->/users/me/messages/send.post(message);
-    log:printInfo("Email sent. Message ID: " + sendResult.id);
+    email:SmtpClient smtpClient = check new (smtpHost, smtpUsername, smtpPassword, smtpConfig);
+
+    email:Message email = {
+        to: recipientEmail,
+        subject: "[fhirtools.io] New User Sign Up",
+        'from: senderEmail,
+        htmlBody: emailTemplate
+    };
+
+    check smtpClient->sendMessage(email);
+    log:printInfo("Email sent");
 }
 
-function generateTable(map<json> userData) returns string|error {
-    
+function generateUserDataTable(map<json> userData) returns string|error {
+
     string htmlTable = "<table style='margin-left: 0; margin-right: auto'><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>";
     map<json> claims = check userData.claims.ensureType();
-    foreach string val in userData.keys() {
-        if val == "claims" {
+    foreach string key in userData.keys() {
+        if key == "claims" {
             htmlTable += "<tr><td>claims</td><td><table><thead><tr><th>Claim</th><th>Value</th></tr></thead><tbody>";
             string[] claimSplit;
-            foreach string claim in claims.keys() {
-                claimSplit = regexp:split(re `/`, claim);
-                htmlTable += string `<tr><td>${claimSplit[claimSplit.length() - 1]}</td><td>${claims[claim].toString()}</td></tr>`;
+            foreach string claimKey in claims.keys() {
+                claimSplit = regexp:split(re `/`, claimKey);
+                htmlTable += string `<tr><td>${claimSplit[claimSplit.length() - 1]}</td><td>${claims[claimKey].toString()}</td></tr>`;
             }
             htmlTable += "</tbody></table></td></tr></tbody></table>";
             return htmlTable;
         }
-        htmlTable += string `<tr><td>${val}</td><td>${userData[val].toString()}</td></tr>`;
+        htmlTable += string `<tr><td>${key}</td><td>${userData[key].toString()}</td></tr>`;
     }
     htmlTable += "</tbody></table>";
     return htmlTable;
