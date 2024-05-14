@@ -9,10 +9,15 @@ configurable string smtpPassword = ?;
 configurable string smtpHost = ?;
 configurable string[] recipientEmails = ?;
 configurable string senderEmail = ?;
+configurable string emailSubject = ?;
+configurable string emailTemplate = ?;
+
+const string[] FIELDS = ["http://wso2.org/claims/emailaddress", "http://wso2.org/claims/created", "userName", "userId", "http://wso2.org/claims/photourl", "http://wso2.org/claims/givenname", "http://wso2.org/claims/lastname"];
 
 listener http:Listener httpListener = new (8090);
 listener asgardeo:Listener webhookListener = new (config, httpListener);
 
+# A service for processing fhirtools.io user registrations and sending email notifications.
 service asgardeo:RegistrationService on webhookListener {
 
     isolated remote function onAddUser(asgardeo:AddUserEvent event) returns error? {
@@ -28,7 +33,7 @@ service asgardeo:RegistrationService on webhookListener {
 
         error? err = sendMail(<map<json>>userData.toJson());
         if (err is error) {
-            log:printDebug(err.message());
+            log:printError(err.message());
         }
         return;
     }
@@ -46,10 +51,14 @@ service asgardeo:RegistrationService on webhookListener {
 service /ignore on httpListener {
 }
 
+# Sends an email notification containing user registration details.
+#
+# + userData - A JSON map containing user data retrieved from the Asgardeo event.
+# + return - An error object if the email sending fails, otherwise null.
 isolated function sendMail(map<json> userData) returns error? {
 
     string userDataTable = check generateUserDataTable(userData);
-    string emailTemplate = "<!DOCTYPE html><html><head><style>table { border-collapse: collapse; border: 1px solid black; width: 80%; margin: 20px auto; } th, td { border: 1px solid black; padding: 5px; } table table { width: 100%; margin: 10px auto; } table table th, table table td { border: 1px solid #ddd; } div { color: black; } </style></head><body><div>A new user has registered on fhirtools.io.<br/><br/><b>User Information</b></div>" + userDataTable + "</body></html>";
+    string formattedEmailTemplate = string `${emailTemplate} ${userDataTable}`;
 
     email:SmtpConfiguration smtpConfig = {
         port: 587,
@@ -60,22 +69,26 @@ isolated function sendMail(map<json> userData) returns error? {
 
     email:Message email = {
         to: recipientEmails,
-        subject: "[fhirtools.io] New User Sign Up",
+        subject: emailSubject,
         'from: senderEmail,
-        htmlBody: emailTemplate
+        htmlBody: formattedEmailTemplate
     };
 
     check smtpClient->sendMessage(email);
     log:printInfo("Email sent");
 }
 
+# Generates an HTML table presenting user information in a formatted way.
+#
+# + userData - A JSON map containing user data retrieved from the Asgardeo event.
+# + return - The generated HTML table representing user data.
 isolated function generateUserDataTable(map<json> userData) returns string|error {
 
     string htmlTable = "<table style='margin-left: 0; margin-right: auto'><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>";
     string formattedKey;
     map<json> claims = check userData.claims.ensureType();
 
-    foreach string key in ["http://wso2.org/claims/emailaddress", "http://wso2.org/claims/created", "userName", "userId", "http://wso2.org/claims/photourl", "http://wso2.org/claims/givenname", "http://wso2.org/claims/lastname"] {
+    foreach string key in FIELDS {
         formattedKey = key == "userName" ? "User Name" : key == "userId" ? "User ID" : "";
         if key.includes("claims") {
             if claims[key].toString() == "" {
